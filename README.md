@@ -145,3 +145,7 @@ python scripts/run_research_loop.py --smoke --cycles 10
 The smoke run proves orchestration only. It is **not** a trading backtest and must never be counted as performance evidence.
 
 See `docs/CONTINUOUS_RESEARCH_V03.md`.
+
+## Research Desk V0.1
+
+Research agents are now wired to a safe declarative strategy DSL. LLMs propose and challenge hypotheses; trusted local code calculates P&L and all quantitative gates. A fair scheduler allows research to continue while candidates wait for one-shot blind evaluation or future shadow data. See `docs/RESEARCH_DESK_V01.md`.
