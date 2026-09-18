@@ -10,6 +10,7 @@ import json
 import os
 import sqlite3
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -32,6 +33,7 @@ class DeskConfig:
     proposal_batch_size: int = 8
     idle_sleep_seconds: float = 5.0
     use_llm_reviews: bool = True
+    total_candidate_cap: int | None = None
 
 
 class DeskHandlers:
@@ -121,16 +123,26 @@ class AgentResearchDesk:
     def _active_count(self) -> int:
         return len(self.store.pending())
 
+    def _total_count(self) -> int:
+        with closing(sqlite3.connect(self.store.path)) as db:
+            return int(db.execute("SELECT COUNT(*) FROM candidates").fetchone()[0])
+
     def _memory(self):
         # Only aggregate non-blind failure reasons are fed back to Researcher.
-        with sqlite3.connect(self.store.path) as db:
+        with closing(sqlite3.connect(self.store.path)) as db:
             rows = db.execute("SELECT stage,reason,COUNT(*) FROM events WHERE passed=0 AND stage!='BLIND' GROUP BY stage,reason ORDER BY COUNT(*) DESC LIMIT 20").fetchall()
         return tuple({"stage": r[0], "reason": r[1], "count": r[2]} for r in rows)
 
     def generate(self) -> int:
         if self._active_count() >= self.config.active_candidate_cap:
             return 0
-        specs = self.researcher.propose(batch_size=self.config.proposal_batch_size, memory=self._memory())
+        batch_size = self.config.proposal_batch_size
+        if self.config.total_candidate_cap is not None:
+            remaining = self.config.total_candidate_cap - self._total_count()
+            if remaining <= 0:
+                return 0
+            batch_size = min(batch_size, remaining)
+        specs = self.researcher.propose(batch_size=batch_size, memory=self._memory())
         created = 0
         for spec in specs:
             cid = f"{spec.family.value.lower()}-{spec.instrument.lower()}-{spec.fingerprint[:12]}"

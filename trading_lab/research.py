@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -120,8 +121,14 @@ class ResearchStore:
                 )
             """)
 
+    @contextmanager
     def _connect(self):
-        return sqlite3.connect(self.path)
+        db = sqlite3.connect(self.path)
+        try:
+            yield db
+            db.commit()
+        finally:
+            db.close()
 
     @staticmethod
     def _now() -> str:

@@ -27,6 +27,10 @@ class OpenAIResponsesProvider:
     base_url: str = "https://api.openai.com/v1"
     default_model: str = "gpt-5.6-luna"
     timeout_seconds: float = 90.0
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
 
     def _model(self, role: str) -> str:
         key = f"TRADING_DESK_MODEL_{role.upper()}"
@@ -54,6 +58,12 @@ class OpenAIResponsesProvider:
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
                 payload = json.loads(resp.read().decode())
+            self.calls += 1
+            usage = payload.get("usage") if isinstance(payload, dict) else None
+            if isinstance(usage, dict):
+                self.input_tokens += int(usage.get("input_tokens") or 0)
+                self.output_tokens += int(usage.get("output_tokens") or 0)
+                self.total_tokens += int(usage.get("total_tokens") or 0)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:1000]
             raise ProviderError(f"OpenAI HTTP {exc.code}: {detail}") from exc

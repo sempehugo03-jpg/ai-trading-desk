@@ -14,7 +14,7 @@ from typing import Iterable, Sequence
 from .data import load_csv_segments
 from .engine import backtest
 from .models import Bar, Config
-from .strategy_dsl import StrategySpec, compile_strategy
+from .strategy_dsl import StrategySpec, compile_strategy_cached
 from .stress import cost_multiplier, spread_multiplier
 
 
@@ -107,11 +107,44 @@ def _segments_in_fraction(segments: Sequence[Sequence[Bar]], start: float, end: 
     return tuple(out)
 
 
+_MARKET_CACHE_KEY = None
+_MARKET_CACHE_VALUE = None
+
+
+def clear_market_cache() -> None:
+    """Release the one-symbol in-process cache used by long research runs."""
+    global _MARKET_CACHE_KEY, _MARKET_CACHE_VALUE
+    _MARKET_CACHE_KEY = None
+    _MARKET_CACHE_VALUE = None
+
+
 def load_market(data_root: str | Path, symbol: str):
-    path = Path(data_root) / symbol / "m1.csv"
+    """Load one market, caching only the most recently used symbol.
+
+    A candidate normally traverses several gates on the same instrument. Parsing
+    a multi-million-row CSV at every gate is wasted work, while caching all five
+    markets can consume excessive RAM in a small Codespace. The cache is therefore
+    deliberately bounded to one symbol and invalidates on file size/mtime change.
+    """
+    global _MARKET_CACHE_KEY, _MARKET_CACHE_VALUE
+    path = (Path(data_root) / symbol / "m1.csv").resolve()
     if not path.exists():
         raise FileNotFoundError(path)
-    return load_csv_segments(path)
+    stat = path.stat()
+    key = (str(path), stat.st_size, stat.st_mtime_ns)
+    if key != _MARKET_CACHE_KEY:
+        _MARKET_CACHE_VALUE = load_csv_segments(path)
+        _MARKET_CACHE_KEY = key
+    return _MARKET_CACHE_VALUE
+
+
+def _research_backtest(segment, spec: StrategySpec, cfg: Config):
+    """O(n) research execution preserving the deterministic engine semantics."""
+    strategy = compile_strategy_cached(spec, segment)
+    return backtest(
+        segment, strategy, cfg, strategy_id=spec.fingerprint[:16],
+        compact_events=True, copy_history=False,
+    )
 
 
 def evaluate_split(spec: StrategySpec, *, data_root: str | Path = "data/raw", split: str = "IS", config: Config | None = None, policy: GatePolicy | None = None) -> QuantOutcome:
@@ -120,9 +153,8 @@ def evaluate_split(spec: StrategySpec, *, data_root: str | Path = "data/raw", sp
     if split not in fractions:
         raise ValueError("split must be IS, VALIDATION or OOS")
     stage_segments = _segments_in_fraction(segments, *fractions[split])
-    strategy = compile_strategy(spec)
     cfg = config or Config(session_start_utc=spec.session_start_utc, session_end_utc=spec.session_end_utc)
-    results = [backtest(seg, strategy, cfg, strategy_id=spec.fingerprint[:16]) for seg in stage_segments]
+    results = [_research_backtest(seg, spec, cfg) for seg in stage_segments]
     metrics = _aggregate(results)
     ok, reason = _passes(metrics, policy or GatePolicy())
     return QuantOutcome(ok, metrics, {"split": split, "segments": len(stage_segments), "strategy_hash": spec.fingerprint}, reason)
@@ -133,14 +165,13 @@ def evaluate_walk_forward(spec: StrategySpec, *, data_root: str | Path = "data/r
         raise ValueError("folds must be >=3")
     segments = load_market(data_root, spec.instrument)
     cfg = config or Config(session_start_utc=spec.session_start_utc, session_end_utc=spec.session_end_utc)
-    strategy = compile_strategy(spec)
     fold_metrics = []
     # Fixed strategy: consecutive future blocks test temporal stability without refitting on the block.
     for i in range(1, folds + 1):
         start = i / (folds + 1)
         end = (i + 1) / (folds + 1)
         segs = _segments_in_fraction(segments, start, end)
-        results = [backtest(seg, strategy, cfg, strategy_id=spec.fingerprint[:16]) for seg in segs]
+        results = [_research_backtest(seg, spec, cfg) for seg in segs]
         fold_metrics.append(_aggregate(results))
     valid = [m for m in fold_metrics if (m.get("closed_trades") or 0) > 0 and m.get("expectancy_r") is not None]
     positive = sum(float(m["expectancy_r"]) > 0 for m in valid)
@@ -160,12 +191,11 @@ def evaluate_walk_forward(spec: StrategySpec, *, data_root: str | Path = "data/r
 def evaluate_stress(spec: StrategySpec, *, data_root: str | Path = "data/raw", config: Config | None = None) -> QuantOutcome:
     segments = _segments_in_fraction(load_market(data_root, spec.instrument), .80, 1.0)
     base = config or Config(session_start_utc=spec.session_start_utc, session_end_utc=spec.session_end_utc)
-    strategy = compile_strategy(spec)
     scenarios = []
     for name, spread_factor, cost_factor in (("BASE",1.0,1.0),("X1_5",1.5,1.5),("X2",2.0,2.0)):
         cfg = cost_multiplier(base, cost_factor) if cost_factor > 1 else base
         segs = [spread_multiplier(seg, spread_factor) if spread_factor > 1 else tuple(seg) for seg in segments]
-        results = [backtest(seg, strategy, cfg, strategy_id=spec.fingerprint[:16]) for seg in segs]
+        results = [_research_backtest(seg, spec, cfg) for seg in segs]
         metrics = _aggregate(results)
         scenarios.append({"name": name, **metrics})
     stressed = scenarios[-1]

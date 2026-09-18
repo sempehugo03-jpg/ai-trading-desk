@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from math import isfinite
 from statistics import mean
-from typing import Mapping
+from typing import Mapping, Sequence
 
 
 class Family(str, Enum):
@@ -172,6 +172,139 @@ def compile_strategy(spec: StrategySpec):
             stop = current + risk
             target = current - risk * spec.target_r
         return Signal(side, stop, target, spec.max_holding_bars * spec.timeframe_minutes)
+
+    return strategy
+
+
+def compile_strategy_cached(spec: StrategySpec, source: Sequence):
+    """Compile a strategy against one fixed M1 segment in O(n) preprocessing.
+
+    The legacy compiler recomputes resampling and rolling indicators from the
+    complete M1 history on every minute. That is intentionally simple but becomes
+    quadratic on multi-year datasets. This compiler precomputes only information
+    that would have been available at each closed higher-timeframe bar, then the
+    returned callback exposes the latest already-closed signal for the current
+    M1 decision time. Future bars never contribute to an earlier signal.
+
+    The callback is stateful for speed and is intended for one chronological
+    backtest pass over the same segment.
+    """
+    from bisect import bisect_right
+    from collections import deque
+    from .data import resample_closed, validate_m1
+    from .models import Side, Signal
+
+    m1 = validate_m1(source)
+    tf = resample_closed(m1, spec.timeframe_minutes, m1[-1].close_time)
+    if not tf:
+        return lambda history: None
+
+    n = len(tf)
+    closes = [float(b.close) for b in tf]
+    highs = [float(b.high) for b in tf]
+    lows = [float(b.low) for b in tf]
+    close_times = [b.close_time for b in tf]
+
+    close_prefix = [0.0] * (n + 1)
+    tr = [0.0] * n
+    tr_prefix = [0.0] * (n + 1)
+    for i, b in enumerate(tf):
+        close_prefix[i + 1] = close_prefix[i] + closes[i]
+        if i:
+            prev = tf[i - 1]
+            tr[i] = max(float(b.high - b.low), abs(float(b.high - prev.close)), abs(float(b.low - prev.close)))
+        tr_prefix[i + 1] = tr_prefix[i] + tr[i]
+
+    def sma(i: int, width: int) -> float:
+        return (close_prefix[i + 1] - close_prefix[i + 1 - width]) / width
+
+    atr_n = min(20, spec.slow_lookback)
+    signals: list[Signal | None] = [None] * n
+    need = max(spec.slow_lookback + 2, 10)
+
+    maxq: deque[int] = deque()
+    minq: deque[int] = deque()
+
+    for i in range(n):
+        # For breakout, maintain exactly the previous `slow_lookback` bars,
+        # excluding the current bar, matching bars[-slow-1:-1].
+        prev_i = i - 1
+        if prev_i >= 0:
+            while maxq and highs[maxq[-1]] <= highs[prev_i]:
+                maxq.pop()
+            maxq.append(prev_i)
+            while minq and lows[minq[-1]] >= lows[prev_i]:
+                minq.pop()
+            minq.append(prev_i)
+        lower = i - spec.slow_lookback
+        while maxq and maxq[0] < lower:
+            maxq.popleft()
+        while minq and minq[0] < lower:
+            minq.popleft()
+
+        if i + 1 < need or i < atr_n:
+            continue
+        start_tr = i - atr_n + 1
+        atr = (tr_prefix[i + 1] - tr_prefix[start_tr]) / atr_n
+        if atr <= 0:
+            continue
+
+        current = closes[i]
+        side = None
+        if spec.family is Family.MOMENTUM:
+            fast = sma(i, spec.fast_lookback)
+            slow = sma(i, spec.slow_lookback)
+            score = (fast - slow) / atr
+            if score >= spec.threshold_atr:
+                side = Side.LONG
+            elif score <= -spec.threshold_atr:
+                side = Side.SHORT
+        elif spec.family is Family.MEAN_REVERSION:
+            slow = sma(i, spec.slow_lookback)
+            score = (current - slow) / atr
+            if score <= -spec.threshold_atr:
+                side = Side.LONG
+            elif score >= spec.threshold_atr:
+                side = Side.SHORT
+        else:
+            if not maxq or not minq:
+                continue
+            hi, lo = highs[maxq[0]], lows[minq[0]]
+            pad = spec.threshold_atr * atr
+            if current >= hi + pad:
+                side = Side.LONG
+            elif current <= lo - pad:
+                side = Side.SHORT
+
+        if side is None:
+            continue
+        if spec.side_mode is SideMode.LONG_ONLY and side is Side.SHORT:
+            continue
+        if spec.side_mode is SideMode.SHORT_ONLY and side is Side.LONG:
+            continue
+
+        risk = spec.stop_atr * atr
+        if side is Side.LONG:
+            stop, target = current - risk, current + risk * spec.target_r
+        else:
+            stop, target = current + risk, current - risk * spec.target_r
+        signals[i] = Signal(side, stop, target, spec.max_holding_bars * spec.timeframe_minutes)
+
+    index = -1
+    last_as_of = None
+
+    def strategy(history):
+        nonlocal index, last_as_of
+        if not history:
+            return None
+        as_of = history[-1].close_time
+        if last_as_of is None or as_of < last_as_of:
+            index = bisect_right(close_times, as_of) - 1
+        else:
+            while index + 1 < n and close_times[index + 1] <= as_of:
+                index += 1
+        last_as_of = as_of
+        return signals[index] if index >= 0 else None
 
     return strategy
 

@@ -7,7 +7,7 @@ from .data import data_fingerprint, validate_m1
 from .journal import HashJournal
 from .models import Bar, Config, Side, Signal, Trade
 
-Strategy = Callable[[tuple[Bar, ...]], Signal | None]
+Strategy = Callable[[Sequence[Bar]], Signal | None]
 
 
 @dataclass
@@ -41,7 +41,8 @@ def in_session(time: datetime, config: Config) -> bool:
 
 
 def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = None,
-             *, journal: HashJournal | None = None, strategy_id: str = "unnamed-control") -> Result:
+             *, journal: HashJournal | None = None, strategy_id: str = "unnamed-control",
+             compact_events: bool = False, copy_history: bool = True) -> Result:
     """Strategy sees only immutable closed bars. Orders fill no earlier than next open.
 
     Trusted callbacks only: Python callbacks are not sandboxed against global files,
@@ -67,6 +68,11 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
     dataset_hash = data_fingerprint(source)
 
     def emit(kind: str, time: datetime, **fields) -> None:
+        # Research runs can omit per-minute NO_TRADE events. This keeps the
+        # simulator O(n) in memory while preserving entries/exits/rejections.
+        # The default remains the fully verbose audit trail used by existing tests.
+        if compact_events and kind in {"NO_TRADE", "ORDER_SUBMITTED", "ORDER_REJECTED"}:
+            return
         event = {"kind": kind, "simulated_time": time, **fields}
         if journal is not None:
             journal.append(event)  # record this decision before progressing to the next bar
@@ -186,7 +192,7 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
         elif not in_session(bar.close_time, cfg):
             emit("NO_TRADE", bar.close_time, reason="OUTSIDE_SESSION")
         else:
-            signal = strategy(tuple(history))
+            signal = strategy(tuple(history) if copy_history else history)
             if signal is None:
                 emit("NO_TRADE", bar.close_time, reason="NO_SIGNAL")
             elif not isinstance(signal, Signal):
