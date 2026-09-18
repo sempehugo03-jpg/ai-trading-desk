@@ -130,3 +130,18 @@ python scripts/check_real_data.py
 ```
 
 See `docs/DATA_SOURCE_V02.md` and `docs/LAB_V02.md`.
+
+## LAB V0.3 — continuous research + blind boxes
+
+V0.3 adds a persistent research state machine, explicit agent-role routing, one-shot sealed blind-box batches, and a North Star evidence tracker.
+
+Infrastructure smoke test:
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/run_research_loop.py --smoke --cycles 10
+```
+
+The smoke run proves orchestration only. It is **not** a trading backtest and must never be counted as performance evidence.
+
+See `docs/CONTINUOUS_RESEARCH_V03.md`.
