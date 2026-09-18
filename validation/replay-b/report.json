@@ -1,0 +1,51 @@
+{
+  "lab_version": "0.1.0",
+  "mode": "HISTORICAL_SIMULATION_ONLY",
+  "data_kind": "SYNTHETIC_NOT_MARKET_DATA",
+  "instrument": "XAUUSD_LIKE_SYNTHETIC",
+  "account_currency": "QUOTE_CURRENCY_UNITS_NOT_EUR",
+  "source_bar_count": 720,
+  "aggregate_bar_counts": {
+    "M5": 144,
+    "M15": 48,
+    "M60": 12,
+    "M240": 3
+  },
+  "identical_replays": true,
+  "dataset_sha256": "5ddb907173491c46c4e443db9cc6db8b1ba10bccc735952b428a60f799d6735e",
+  "source_code_sha256": "3c7217cdec390104b279f20ee46c944a02f15527c76c02f0d3a4171d87603766",
+  "result_sha256": "47a4e5d35195aba4eab4b37198ca5dc5617cc4330798e5774407cd606c16dca2",
+  "journal_records": 784,
+  "journal_head": "68fc4bcb2302690e434e30f39a64198e557fff1f4408f43bba460e501d3e8c82",
+  "statistics": {
+    "closed_trades": 7,
+    "open_positions": 0,
+    "unfilled_at_end": 0,
+    "observed_session_days": 1,
+    "entries_per_observed_session_day": 7.0,
+    "expectancy_r": -0.5718795682555228,
+    "win_rate_closed_trades": 0.14285714285714285,
+    "profit_factor_quote": 0.21917230818693773,
+    "profit_factor_status": "DEFINED",
+    "max_drawdown_closed_trades_r": 4.0031569777886595,
+    "max_drawdown_m1_close_pct": 1.0261752971833196,
+    "total_return_mark_to_market_pct": -0.9976372703833669,
+    "net_pnl_closed_quote": -99.76372703833876,
+    "commission_closed_quote": 1.0851621220609842,
+    "initial_equity_quote": 10000.0,
+    "final_cash_quote": 9900.236272961663,
+    "final_equity_quote": 9900.236272961663,
+    "event_counts": {
+      "ENTRY": 7,
+      "EXIT": 7,
+      "NO_TRADE": 665,
+      "ORDER_REJECTED": 48,
+      "ORDER_SUBMITTED": 55,
+      "RUN_END": 1,
+      "RUN_START": 1
+    },
+    "monthly_target_demonstrated": false,
+    "robustness_demonstrated": false,
+    "warning": "Technical simulation metrics; not an estimate of future profitability. M1-close drawdown is not intrabar maximum drawdown."
+  }
+}
