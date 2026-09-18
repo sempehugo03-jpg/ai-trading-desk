@@ -4,12 +4,11 @@ LLM agents do not calculate P&L. This module does.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import timedelta
+from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
 from statistics import mean
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from .data import load_csv_segments
 from .engine import backtest
@@ -44,9 +43,7 @@ def _aggregate(results) -> dict:
     rs = [float(t.r_multiple) for t in trades]
     wins = sum(x for x in rs if x > 0)
     losses = -sum(x for x in rs if x < 0)
-    eq = 0.0
-    peak = 0.0
-    dd = 0.0
+    eq = peak = dd = 0.0
     for x in rs:
         eq += x
         peak = max(peak, eq)
@@ -63,28 +60,32 @@ def _aggregate(results) -> dict:
     }
 
 
-def _passes(metrics: dict, policy: GatePolicy) -> tuple[bool, str]:
+def gate_failures(metrics: dict, policy: GatePolicy) -> tuple[str, ...]:
+    """Return ALL failed gates, not merely the first one."""
+    failures = []
     n = int(metrics.get("closed_trades") or 0)
     exp = metrics.get("expectancy_r")
     pf = metrics.get("profit_factor_r")
     dd = metrics.get("max_drawdown_r")
     if n < policy.min_trades:
-        return False, "INSUFFICIENT_TRADES"
+        failures.append("INSUFFICIENT_TRADES")
     if exp is None or not isfinite(float(exp)) or float(exp) <= policy.min_expectancy_r:
-        return False, "NON_POSITIVE_EXPECTANCY"
+        failures.append("NON_POSITIVE_EXPECTANCY")
     if pf is None or not isfinite(float(pf)) or float(pf) < policy.min_profit_factor_r:
-        return False, "PROFIT_FACTOR_GATE"
+        failures.append("PROFIT_FACTOR_GATE")
     if dd is None or float(dd) > policy.max_drawdown_r:
-        return False, "DRAWDOWN_R_GATE"
-    return True, "QUANT_PASS"
+        failures.append("DRAWDOWN_R_GATE")
+    return tuple(failures)
 
 
-def _segments_in_fraction(segments: Sequence[Sequence[Bar]], start: float, end: float) -> tuple[tuple[Bar, ...], ...]:
-    """Select a chronological count-fraction without joining market gaps.
+def _passes(metrics: dict, policy: GatePolicy) -> tuple[bool, str, tuple[str, ...]]:
+    failures = gate_failures(metrics, policy)
+    return (not failures, failures[0] if failures else "QUANT_PASS", failures)
 
-    This avoids a huge timestamp set for multi-year M1 datasets and preserves each
-    provider-contiguous segment as an independent backtest unit.
-    """
+
+def _segments_in_fraction(
+    segments: Sequence[Sequence[Bar]], start: float, end: float
+) -> tuple[tuple[Bar, ...], ...]:
     if not (0 <= start < end <= 1):
         raise ValueError("invalid fraction")
     total = sum(len(seg) for seg in segments)
@@ -112,20 +113,12 @@ _MARKET_CACHE_VALUE = None
 
 
 def clear_market_cache() -> None:
-    """Release the one-symbol in-process cache used by long research runs."""
     global _MARKET_CACHE_KEY, _MARKET_CACHE_VALUE
     _MARKET_CACHE_KEY = None
     _MARKET_CACHE_VALUE = None
 
 
 def load_market(data_root: str | Path, symbol: str):
-    """Load one market, caching only the most recently used symbol.
-
-    A candidate normally traverses several gates on the same instrument. Parsing
-    a multi-million-row CSV at every gate is wasted work, while caching all five
-    markets can consume excessive RAM in a small Codespace. The cache is therefore
-    deliberately bounded to one symbol and invalidates on file size/mtime change.
-    """
     global _MARKET_CACHE_KEY, _MARKET_CACHE_VALUE
     path = (Path(data_root) / symbol / "m1.csv").resolve()
     if not path.exists():
@@ -139,7 +132,6 @@ def load_market(data_root: str | Path, symbol: str):
 
 
 def _research_backtest(segment, spec: StrategySpec, cfg: Config):
-    """O(n) research execution preserving the deterministic engine semantics."""
     strategy = compile_strategy_cached(spec, segment)
     return backtest(
         segment, strategy, cfg, strategy_id=spec.fingerprint[:16],
@@ -147,57 +139,112 @@ def _research_backtest(segment, spec: StrategySpec, cfg: Config):
     )
 
 
-def evaluate_split(spec: StrategySpec, *, data_root: str | Path = "data/raw", split: str = "IS", config: Config | None = None, policy: GatePolicy | None = None) -> QuantOutcome:
+def evaluate_split(
+    spec: StrategySpec, *, data_root: str | Path = "data/raw",
+    split: str = "IS", config: Config | None = None,
+    policy: GatePolicy | None = None,
+) -> QuantOutcome:
     segments = load_market(data_root, spec.instrument)
     fractions = {"IS": (0.0, .60), "VALIDATION": (.60, .80), "OOS": (.80, 1.0)}
     if split not in fractions:
         raise ValueError("split must be IS, VALIDATION or OOS")
     stage_segments = _segments_in_fraction(segments, *fractions[split])
-    cfg = config or Config(session_start_utc=spec.session_start_utc, session_end_utc=spec.session_end_utc)
+    cfg = config or Config(
+        session_start_utc=spec.session_start_utc,
+        session_end_utc=spec.session_end_utc,
+    )
     results = [_research_backtest(seg, spec, cfg) for seg in stage_segments]
     metrics = _aggregate(results)
-    ok, reason = _passes(metrics, policy or GatePolicy())
-    return QuantOutcome(ok, metrics, {"split": split, "segments": len(stage_segments), "strategy_hash": spec.fingerprint}, reason)
+    p = policy or GatePolicy()
+    ok, reason, failures = _passes(metrics, p)
+    return QuantOutcome(
+        ok, metrics,
+        {
+            "split": split,
+            "segments": len(stage_segments),
+            "strategy_hash": spec.fingerprint,
+            "failed_gates": failures,
+        },
+        reason,
+    )
 
 
-def evaluate_walk_forward(spec: StrategySpec, *, data_root: str | Path = "data/raw", folds: int = 5, config: Config | None = None, policy: GatePolicy | None = None) -> QuantOutcome:
+def evaluate_walk_forward(
+    spec: StrategySpec, *, data_root: str | Path = "data/raw",
+    folds: int = 5, config: Config | None = None,
+    policy: GatePolicy | None = None,
+) -> QuantOutcome:
     if folds < 3:
         raise ValueError("folds must be >=3")
     segments = load_market(data_root, spec.instrument)
-    cfg = config or Config(session_start_utc=spec.session_start_utc, session_end_utc=spec.session_end_utc)
+    cfg = config or Config(
+        session_start_utc=spec.session_start_utc,
+        session_end_utc=spec.session_end_utc,
+    )
     fold_metrics = []
-    # Fixed strategy: consecutive future blocks test temporal stability without refitting on the block.
     for i in range(1, folds + 1):
         start = i / (folds + 1)
         end = (i + 1) / (folds + 1)
         segs = _segments_in_fraction(segments, start, end)
         results = [_research_backtest(seg, spec, cfg) for seg in segs]
         fold_metrics.append(_aggregate(results))
-    valid = [m for m in fold_metrics if (m.get("closed_trades") or 0) > 0 and m.get("expectancy_r") is not None]
+    valid = [
+        m for m in fold_metrics
+        if (m.get("closed_trades") or 0) > 0 and m.get("expectancy_r") is not None
+    ]
     positive = sum(float(m["expectancy_r"]) > 0 for m in valid)
     fraction = positive / len(valid) if valid else 0.0
-    combined_rs_proxy = {
+    metrics = {
         "closed_trades": sum(int(m.get("closed_trades") or 0) for m in fold_metrics),
         "positive_fold_fraction": fraction,
         "folds_with_trades": len(valid),
         "mean_fold_expectancy_r": mean(float(m["expectancy_r"]) for m in valid) if valid else None,
-        "worst_fold_expectancy_r": min((float(m["expectancy_r"]) for m in valid), default=None),
+        "worst_fold_expectancy_r": min(
+            (float(m["expectancy_r"]) for m in valid), default=None
+        ),
     }
     p = policy or GatePolicy()
-    ok = len(valid) >= max(2, folds // 2) and fraction >= p.min_positive_fold_fraction and (combined_rs_proxy["mean_fold_expectancy_r"] or -1) > 0
-    return QuantOutcome(ok, combined_rs_proxy, {"fold_metrics": fold_metrics}, "WALK_FORWARD_PASS" if ok else "WALK_FORWARD_UNSTABLE")
+    ok = (
+        len(valid) >= max(2, folds // 2)
+        and fraction >= p.min_positive_fold_fraction
+        and (metrics["mean_fold_expectancy_r"] or -1) > 0
+    )
+    return QuantOutcome(
+        ok, metrics, {"fold_metrics": fold_metrics},
+        "WALK_FORWARD_PASS" if ok else "WALK_FORWARD_UNSTABLE",
+    )
 
 
-def evaluate_stress(spec: StrategySpec, *, data_root: str | Path = "data/raw", config: Config | None = None) -> QuantOutcome:
+def evaluate_stress(
+    spec: StrategySpec, *, data_root: str | Path = "data/raw",
+    config: Config | None = None,
+) -> QuantOutcome:
     segments = _segments_in_fraction(load_market(data_root, spec.instrument), .80, 1.0)
-    base = config or Config(session_start_utc=spec.session_start_utc, session_end_utc=spec.session_end_utc)
+    base = config or Config(
+        session_start_utc=spec.session_start_utc,
+        session_end_utc=spec.session_end_utc,
+    )
     scenarios = []
-    for name, spread_factor, cost_factor in (("BASE",1.0,1.0),("X1_5",1.5,1.5),("X2",2.0,2.0)):
+    for name, spread_factor, cost_factor in (
+        ("BASE", 1.0, 1.0), ("X1_5", 1.5, 1.5), ("X2", 2.0, 2.0)
+    ):
         cfg = cost_multiplier(base, cost_factor) if cost_factor > 1 else base
-        segs = [spread_multiplier(seg, spread_factor) if spread_factor > 1 else tuple(seg) for seg in segments]
+        segs = [
+            spread_multiplier(seg, spread_factor)
+            if spread_factor > 1 else tuple(seg)
+            for seg in segments
+        ]
         results = [_research_backtest(seg, spec, cfg) for seg in segs]
-        metrics = _aggregate(results)
-        scenarios.append({"name": name, **metrics})
+        scenarios.append({"name": name, **_aggregate(results)})
     stressed = scenarios[-1]
-    ok = int(stressed.get("closed_trades") or 0) >= 10 and (stressed.get("expectancy_r") is not None and float(stressed["expectancy_r"]) > 0)
-    return QuantOutcome(ok, {"scenarios": scenarios}, {"stress_max": "2x spread/cost"}, "STRESS_PASS" if ok else "STRESS_FAIL")
+    failures = []
+    if int(stressed.get("closed_trades") or 0) < 10:
+        failures.append("STRESS_INSUFFICIENT_TRADES")
+    if stressed.get("expectancy_r") is None or float(stressed["expectancy_r"]) <= 0:
+        failures.append("STRESS_NON_POSITIVE_EXPECTANCY")
+    ok = not failures
+    return QuantOutcome(
+        ok, {"scenarios": scenarios},
+        {"stress_max": "2x spread/cost", "failed_gates": tuple(failures)},
+        "STRESS_PASS" if ok else failures[0],
+    )
