@@ -22,7 +22,7 @@ agents autonomes ont travaillé si aucun tel processus n'a été exécuté.
 ## Contraintes
 
 - Aucun ordre réel, adaptateur courtier en écriture, clé API ni achat de données.
-- Aucune recherche agentique automatique dans cette V0.1.
+- Aucune recherche agentique automatique tant que le gate données réelles V0.2 n’est pas validé.
 - Ne pas ouvrir/réutiliser un holdout pour corriger une stratégie après avoir vu son score.
 - Les callbacks Python du LAB sont de confiance ; ils ne sont pas isolés. Ne pas exécuter
   de code arbitraire produit par un modèle avant d'avoir ajouté un environnement isolé.

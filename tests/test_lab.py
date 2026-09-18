@@ -527,3 +527,119 @@ class MetricsAndIntegrationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class RealAskExecutionTests(unittest.TestCase):
+    def exact(self, bid=(100,101,99,100), ask=(100.2,101.3,99.2,100.2), start=START):
+        return Bar(start, *bid, ask[0]-bid[0], 1, *ask, 10.0)
+
+    def test_exact_ask_long_entry(self):
+        bars = (
+            self.exact(),
+            self.exact(bid=(100,103,99.5,102), ask=(100.7,103.7,100.2,102.7), start=START+timedelta(minutes=1)),
+        )
+        result = backtest(bars, once(Signal(Side.LONG, 99, 102)), config(slippage=0, commission_per_unit_side=0))
+        self.assertAlmostEqual(next(e for e in result.events if e['kind']=='ENTRY')['entry'], 100.7)
+
+    def test_exact_ask_short_stop_detection(self):
+        bars = (
+            self.exact(),
+            self.exact(bid=(100,100.6,97,98), ask=(100.4,101.2,97.4,98.4), start=START+timedelta(minutes=1)),
+        )
+        result = backtest(bars, once(Signal(Side.SHORT, 101, 98)), config(slippage=0, commission_per_unit_side=0))
+        self.assertEqual(result.trades[0].reason, 'STOP')
+
+    def test_incomplete_ask_rejected(self):
+        with self.assertRaises(DataError):
+            Bar(START, 100, 101, 99, 100, .2, ask_open=100.2)
+
+    def test_spread_must_match_exact_open_quotes(self):
+        with self.assertRaises(DataError):
+            Bar(START, 100, 101, 99, 100, .1, 1, 100.2, 101.2, 99.2, 100.2)
+
+    def test_csv_exact_ask_roundtrip(self):
+        from trading_lab.data import write_csv, load_csv
+        bars = tuple(self.exact(start=START+timedelta(minutes=i)) for i in range(3))
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)/'real.csv'
+            write_csv(p, bars)
+            loaded = load_csv(p)
+            self.assertEqual(loaded, bars)
+            self.assertTrue(all(b.has_exact_ask for b in loaded))
+
+    def test_resample_exact_ask(self):
+        from trading_lab.data import resample_closed
+        bars=[]
+        for i in range(5):
+            bars.append(Bar(START+timedelta(minutes=i),100+i,101+i,99+i,100.5+i,.2,1,
+                            100.2+i,101.2+i,99.2+i,100.7+i,10))
+        out=resample_closed(tuple(bars),5,START+timedelta(minutes=5))
+        self.assertEqual(len(out),1)
+        self.assertTrue(out[0].has_exact_ask)
+        self.assertAlmostEqual(out[0].spread,.2)
+        self.assertEqual(out[0].volume,50)
+
+
+class SplitStressRegistryTests(unittest.TestCase):
+    def test_chronological_holdout_order(self):
+        from trading_lab.splits import chronological_holdout
+        bars = sequence([(100,101,99,100)]*100)
+        is_, val, oos = chronological_holdout(bars)
+        self.assertLess(is_.end, val.end)
+        self.assertLessEqual(is_.end, val.start)
+        self.assertLessEqual(val.end, oos.start)
+        self.assertEqual(len(is_.bars)+len(val.bars)+len(oos.bars),100)
+
+    def test_walk_forward_is_chronological(self):
+        from trading_lab.splits import walk_forward_windows
+        bars = sequence([(100,101,99,100)]*(60*24*40))
+        windows = list(walk_forward_windows(bars, train_days=10, test_days=5, step_days=5))
+        self.assertTrue(windows)
+        for train, test in windows:
+            self.assertEqual(train.end, test.start)
+            self.assertTrue(train.bars and test.bars)
+
+    def test_spread_stress_exact_ask(self):
+        from trading_lab.stress import spread_multiplier
+        b=Bar(START,100,101,99,100,.2,1,100.2,101.3,99.4,100.25,10)
+        x=spread_multiplier((b,),2)[0]
+        self.assertAlmostEqual(x.spread,.4)
+        self.assertAlmostEqual(x.ask_open,100.4)
+        self.assertGreaterEqual(x.ask_low,x.low)
+
+    def test_cost_stress(self):
+        from trading_lab.stress import cost_multiplier
+        c=config(slippage=.1, commission_per_unit_side=.02)
+        x=cost_multiplier(c,2)
+        self.assertAlmostEqual(x.slippage,.2)
+        self.assertAlmostEqual(x.commission_per_unit_side,.04)
+
+    def test_registry_is_append_only(self):
+        from trading_lab.registry import ExperimentRegistry
+        with tempfile.TemporaryDirectory() as tmp:
+            r=ExperimentRegistry(Path(tmp)/'experiments.sqlite3')
+            first=r.append(strategy_id='s1',instrument='XAUUSD',split='IS',dataset_sha256='abc',params={'a':1},metrics={'r':.2},status='PASS')
+            second=r.append(strategy_id='s1',instrument='XAUUSD',split='OOS',dataset_sha256='def',params={'a':1},metrics={'r':-.1},status='FAIL')
+            self.assertEqual((first,second),(1,2))
+            rows=r.all()
+            self.assertEqual(len(rows),2)
+            self.assertEqual(rows[1].status,'FAIL')
+
+    def test_universe_has_five_assets(self):
+        from trading_lab.universe import UNIVERSE
+        self.assertEqual([x.symbol for x in UNIVERSE], ['XAUUSD','NAS100','US500','EURUSD','GBPUSD'])
+
+
+class RealDataGapTests(unittest.TestCase):
+    def test_real_loader_splits_market_gap_without_forward_fill(self):
+        from trading_lab.data import load_csv_segments
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'gappy.csv'
+            p.write_text(
+                'timestamp_open,bid_open,bid_high,bid_low,bid_close,spread_price\n'
+                '2025-01-06T10:00:00+00:00,100,101,99,100,0.1\n'
+                '2025-01-06T10:01:00+00:00,100,101,99,100,0.1\n'
+                '2025-01-06T10:05:00+00:00,100,101,99,100,0.1\n'
+            )
+            segments=load_csv_segments(p)
+            self.assertEqual([len(x) for x in segments],[2,1])
+            self.assertEqual(segments[1][0].open_time, START.replace(hour=10, minute=5))

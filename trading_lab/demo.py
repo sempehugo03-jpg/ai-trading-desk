@@ -58,7 +58,7 @@ def run_demo(output: str | Path, csv_path: str | Path | None = None) -> dict:
         code_hash.update(path.name.encode() + b"\0" + path.read_bytes())
     result_hash = digest(asdict(replay))
     report = {
-        "lab_version": "0.1.0",
+        "lab_version": "0.2.0",
         "mode": "HISTORICAL_SIMULATION_ONLY",
         "data_kind": "USER_CSV_NOT_PROVIDER_VERIFIED" if csv_path else "SYNTHETIC_NOT_MARKET_DATA",
         "instrument": "SINGLE_INSTRUMENT_BID_CSV" if csv_path else "XAUUSD_LIKE_SYNTHETIC",
@@ -82,7 +82,7 @@ def run_demo(output: str | Path, csv_path: str | Path | None = None) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="LAB V0.1: offline simulation only; no real execution")
+    parser = argparse.ArgumentParser(description="LAB V0.2: deterministic simulation; no real execution")
     parser.add_argument("--out", default="runs/demo-v01", help="New output folder (existing paths are refused)")
     parser.add_argument("--csv", help="Explicit bid OHLC M1 CSV with timezone and spread_price columns")
     args = parser.parse_args()

@@ -1,0 +1,12 @@
+{
+  "name": "ai-trading-desk-data-tools",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Pinned historical market-data fetcher for LAB V0.2",
+  "dependencies": {
+    "dukascopy-node": "1.50.0"
+  },
+  "scripts": {
+    "data:smoke": "node scripts/fetch_dukascopy.cjs --from 2025-03-03 --to 2025-03-10 --all"
+  }
+}

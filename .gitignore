@@ -11,3 +11,7 @@ dist/
 runs/
 data/
 *.lock
+node_modules/
+package-lock.json
+*.sqlite3
+*.db

@@ -1,4 +1,4 @@
-# AI Trading Desk — LAB V0.1
+# AI Trading Desk — LAB V0.2
 
 **Laboratoire Python hors ligne. Prototype technique testé sur données synthétiques.**
 
@@ -115,3 +115,18 @@ locale ; aucun commit distant ni succès de CI distante n'est revendiqué.
 
 Ne jamais ajouter de clés, identifiants courtier ou données privées dans le dépôt.
 Le dépôt cible était public lors de sa dernière lecture.
+
+
+## LAB V0.2 — real data gate
+
+V0.2 adds the five-asset research universe, exact BID/ASK M1 support, chronological holdouts, walk-forward windows, cost stress tests and an append-only experiment registry.
+
+Smoke-test real data:
+
+```bash
+npm install
+npm run data:smoke
+python scripts/check_real_data.py
+```
+
+See `docs/DATA_SOURCE_V02.md` and `docs/LAB_V02.md`.

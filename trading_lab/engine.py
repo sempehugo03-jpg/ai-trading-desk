@@ -76,7 +76,7 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
         if position is None:
             return cash
         side = position.signal.side
-        liquidation = bar.close - cfg.slippage if side is Side.LONG else bar.close + bar.spread + cfg.slippage
+        liquidation = bar.executable_close(side) - side.sign * cfg.slippage
         return cash + side.sign * (liquidation - position.entry) * position.units - cfg.commission_per_unit_side * position.units
 
     def close(bar: Bar, price: float, reason: str, *, ambiguous: bool = False, at_open: bool = False) -> None:
@@ -109,7 +109,7 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
         if pending is not None:
             decision, signal = pending
             pending = None  # market-next-open order; never silently carried forward
-            entry = bar.open + bar.spread + cfg.slippage if signal.side is Side.LONG else bar.open - cfg.slippage
+            entry = bar.executable_open(signal.side) + signal.side.sign * cfg.slippage
             geometry = signal.stop < entry < signal.target if signal.side is Side.LONG else signal.target < entry < signal.stop
             distance = abs(entry - signal.stop)
             risk_budget = cash * cfg.risk_fraction
@@ -122,7 +122,7 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
                 reason = "RISK_HALTED"
             elif not geometry:
                 reason = "INVALID_ENTRY_AFTER_GAP"
-            elif bar.spread > distance * cfg.max_spread_to_stop:
+            elif (bar.executable_open(Side.LONG) - bar.executable_open(Side.SHORT)) > distance * cfg.max_spread_to_stop:
                 reason = "SPREAD_TOO_HIGH"
             elif cash <= 0 or risk_budget > cash - day_start * (1 - cfg.max_daily_loss) + 1e-9:
                 reason = "DAILY_RISK_BUDGET"
@@ -143,9 +143,9 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
             p = position
             p.held_bars += 1
             long = p.signal.side is Side.LONG
-            quote_open = bar.open if long else bar.open + bar.spread
-            quote_low = bar.low if long else bar.low + bar.spread
-            quote_high = bar.high if long else bar.high + bar.spread
+            quote_open = bar.executable_open(p.signal.side)
+            quote_low = bar.executable_low(p.signal.side)
+            quote_high = bar.executable_high(p.signal.side)
             stop, target = p.signal.stop, p.signal.target
             gap_stop = quote_open <= stop if long else quote_open >= stop
             gap_target = quote_open >= target if long else quote_open <= target
@@ -160,10 +160,10 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
             elif hit_target:
                 close(bar, target, "TARGET")  # target is a limit; no worse-than-limit slippage
             elif bar.close_time.date() != bar.open_time.date() or not in_session(bar.close_time, cfg):
-                price = bar.close - cfg.slippage if long else bar.close + bar.spread + cfg.slippage
+                price = bar.executable_close(p.signal.side) - p.signal.side.sign * cfg.slippage
                 close(bar, price, "SESSION_END")
             elif p.held_bars >= p.signal.max_holding_bars:
-                price = bar.close - cfg.slippage if long else bar.close + bar.spread + cfg.slippage
+                price = bar.executable_close(p.signal.side) - p.signal.side.sign * cfg.slippage
                 close(bar, price, "TIME_STOP")
 
         equity = mark(bar)
@@ -174,7 +174,7 @@ def backtest(bars: Sequence[Bar], strategy: Strategy, config: Config | None = No
         halted = halted or dd_breach
         if (daily_breach or dd_breach) and position is not None:
             side = position.signal.side
-            price = bar.close - cfg.slippage if side is Side.LONG else bar.close + bar.spread + cfg.slippage
+            price = bar.executable_close(side) - side.sign * cfg.slippage
             close(bar, price, "RISK_CLOSE")
             equity = cash
         curve.append((bar.close_time, equity))

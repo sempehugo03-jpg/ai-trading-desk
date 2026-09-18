@@ -34,6 +34,12 @@ class Side(str, Enum):
 
 @dataclass(frozen=True)
 class Bar:
+    """One closed price bar.
+
+    `open/high/low/close` are BID prices. `spread` is the executable spread at
+    the bar open. When exact ASK OHLC is available it is stored explicitly;
+    otherwise ASK is conservatively approximated as BID + `spread`.
+    """
     open_time: datetime
     open: float
     high: float
@@ -41,6 +47,11 @@ class Bar:
     close: float
     spread: float
     minutes: int = 1
+    ask_open: float | None = None
+    ask_high: float | None = None
+    ask_low: float | None = None
+    ask_close: float | None = None
+    volume: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "open_time", utc(self.open_time))
@@ -56,9 +67,58 @@ class Bar:
         if not self.low <= min(self.open, self.close) <= max(self.open, self.close) <= self.high:
             raise DataError("Invalid bid OHLC relationships")
 
+        asks = (self.ask_open, self.ask_high, self.ask_low, self.ask_close)
+        if any(value is not None for value in asks):
+            if not all(value is not None for value in asks):
+                raise DataError("ASK OHLC must be supplied as a complete set")
+            for name in ("ask_open", "ask_high", "ask_low", "ask_close"):
+                finite(getattr(self, name), name, positive=True)
+            assert self.ask_open is not None and self.ask_high is not None
+            assert self.ask_low is not None and self.ask_close is not None
+            if not self.ask_low <= min(self.ask_open, self.ask_close) <= max(self.ask_open, self.ask_close) <= self.ask_high:
+                raise DataError("Invalid ask OHLC relationships")
+            for ask_value, bid_value, label in (
+                (self.ask_open, self.open, "open"), (self.ask_high, self.high, "high"),
+                (self.ask_low, self.low, "low"), (self.ask_close, self.close, "close"),
+            ):
+                if ask_value < bid_value:
+                    raise DataError(f"ASK cannot be below BID at {label}")
+            # Exact real-data bars define spread from the opening executable quotes.
+            if abs((self.ask_open - self.open) - self.spread) > max(1e-12, abs(self.spread) * 1e-7):
+                raise DataError("spread must equal ask_open - bid_open when exact ASK is supplied")
+
+        if self.volume is not None:
+            finite(self.volume, "volume")
+            if self.volume < 0:
+                raise DataError("Volume cannot be negative")
+
     @property
     def close_time(self) -> datetime:
         return self.open_time + timedelta(minutes=self.minutes)
+
+    @property
+    def has_exact_ask(self) -> bool:
+        return self.ask_open is not None
+
+    def executable_open(self, side: Side) -> float:
+        if side is Side.LONG:
+            return self.ask_open if self.ask_open is not None else self.open + self.spread
+        return self.open
+
+    def executable_high(self, side: Side) -> float:
+        if side is Side.SHORT:
+            return self.ask_high if self.ask_high is not None else self.high + self.spread
+        return self.high
+
+    def executable_low(self, side: Side) -> float:
+        if side is Side.SHORT:
+            return self.ask_low if self.ask_low is not None else self.low + self.spread
+        return self.low
+
+    def executable_close(self, side: Side) -> float:
+        if side is Side.SHORT:
+            return self.ask_close if self.ask_close is not None else self.close + self.spread
+        return self.close
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,38 @@
+{
+  "generated_at_utc": "2026-09-18T11:44:34.840626+00:00",
+  "python": "3.13.5",
+  "tests_run": 92,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests_passed": true,
+  "scope": "Software tests and synthetic simulation only; no profitability validation.",
+  "execution_environment": "LOCAL",
+  "publication_status_checked": false,
+  "replay_artifacts": {
+    "report.json": {
+      "identical": true,
+      "sha256": "71bf4b719ed76d52421dd524243ae3b88921cc0921629e57d43041d6569fc0b2"
+    },
+    "trades.json": {
+      "identical": true,
+      "sha256": "39a7cda97e48552376977089cba01aac186ed22156b894fa4df4c3ef3bcb0976"
+    },
+    "equity.json": {
+      "identical": true,
+      "sha256": "40fed6bcb104fd5191c47f4a2677b83f69869de7625f089696ed42b068519501"
+    },
+    "journal.jsonl": {
+      "identical": true,
+      "sha256": "b875088167b5b3ff110a489d5cf896a0306d86ee06bd9f803267a27c6b3b8e31"
+    },
+    "synthetic_m1.csv": {
+      "identical": true,
+      "sha256": "903a2a408965c98bbc89aebcad955c8f766ed2f9c6b02ce6ed657edafb17217a"
+    }
+  },
+  "two_full_replays_identical": true,
+  "synthetic_bar_count": 720,
+  "journal_records_per_replay": 784,
+  "technical_checks_passed": true
+}

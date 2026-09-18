@@ -1,41 +1,26 @@
-# Prochain jalon : LAB V0.2A — données et calibration
+# Prochain jalon : Research Desk V0.1
 
-## Ne pas démarrer par neuf agents
+## Condition préalable
 
-Le premier besoin est un historique identifié et un modèle d'exécution calibré.
-Le test synthétique valide des mécanismes, pas leur réalisme sur le marché.
+Ne pas lancer les agents de recherche avant que le smoke test données réelles V0.2 passe sur les cinq instruments et que le split chronologique initial soit figé.
 
-## Prérequis à obtenir
+## Première mission du Research Desk
 
-Choisir un fournisseur/courtier, ses instruments exacts et son historique bid/ask.
-Vérifier accès, droit d'usage, périodes, spread, ticks ou granularité disponible,
-coûts, tailles de contrat, pas, marges, calendrier et fuseau de chaque actif.
-Aucun abonnement payant ou clé n'est demandé dans cette livraison.
+1. Générer des hypothèses explicites et testables, sans accès au holdout final.
+2. Transformer chaque hypothèse en stratégie exécutable versionnée.
+3. Tester IS puis validation, avec registre exhaustif des essais.
+4. Appliquer walk-forward et stress spread/slippage.
+5. Rejeter les stratégies instables avant toute lecture du holdout final.
+6. Construire seulement ensuite un portefeuille de 3 à 5 stratégies complémentaires.
 
-Définir avant recherche le risque acceptable, la limite de drawdown, les coûts
-inclus dans « net », le budget d'expériences et la règle de décision statistique.
-Les plafonds de la démo ne constituent pas un accord pour le réel.
+## North Star
 
-## Travail prévu
+La cible de recherche reste environ 10 % net/mois et au moins une opportunité quotidienne en moyenne au niveau du portefeuille. Elle ne permet jamais de contourner les règles de robustesse, drawdown, coûts, OOS ou Risk Manager.
 
-1. Adaptateur d'import avec métadonnées de provenance et contrôles de couverture.
-2. Calendriers/sessions, ticks bid/ask si disponibles, latence et fills non garantis.
-3. Taille de contrat, unités de cotation, pas de lot et conversions EUR correctement datées.
-4. Découpage chronologique développement/validation/holdout, avec séparation explicite
-   des folds, purge des observations qui se chevauchent et holdout final isolé.
-5. Registre durable de chaque expérience, budgets et échecs ; seulement ensuite
-   premières hypothèses de recherche en nombre borné.
+## Interdictions
 
-## Conditions de passage
-
-Un export réel traçable est ingéré sans correction silencieuse ; plusieurs
-scénarios d'exécution sont rapprochés de calculs manuels bid/ask ; les coûts et
-limites sont documentés ; le holdout ne rentre pas dans la boucle d'optimisation.
-Aucune rentabilité n'est revendiquée avant ces éléments et leurs évaluations.
-
-## Livraison distante
-
-L'écriture via l'intégration GitHub a répondu 403 sur la création de branche.
-Il faut une autorisation d'écriture valide pour cette connexion et ce dépôt avant
-de publier par ce canal. Ne pas confondre cette permission avec celles d'un
-workflow GitHub Actions. Ne pas changer la visibilité pour tenter de la remplacer.
+- aucun capital réel ;
+- aucune optimisation sur le holdout final ;
+- aucune suppression rétroactive d’un essai perdant ;
+- aucune modification live d’une stratégie après quelques pertes ;
+- aucune affirmation de performance avant données réelles, OOS et paper live.
