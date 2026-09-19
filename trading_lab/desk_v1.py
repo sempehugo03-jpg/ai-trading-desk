@@ -566,7 +566,7 @@ class DeskV1:
             rows=db.execute("""
                 SELECT c.spec_json,e.stage,e.reason,e.metrics_json
                 FROM events e JOIN candidates c ON c.candidate_id=e.candidate_id
-                WHERE e.passed=0 AND e.stage!='BLIND'
+                WHERE e.passed=0 AND e.stage IN ('RESEARCH','VALIDATION')
                 ORDER BY e.id DESC LIMIT 30
             """).fetchall()
         ans=[]
