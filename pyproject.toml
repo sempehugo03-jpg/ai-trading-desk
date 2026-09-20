@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-trading-desk-lab"
-version = "1.0.0"
-description = "Multi-asset multi-strategy quant research desk with portfolio and prop-firm risk layers. No live execution."
+version = "2.0.0"
+description = "Market-first discovery engine with progressive evidence gates and protected OOS. No live execution."
 requires-python = ">=3.11"
 dependencies = []
 
