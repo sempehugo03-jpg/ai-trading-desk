@@ -1,13 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
+requires=["setuptools>=68"]
+build-backend="setuptools.build_meta"
 [project]
-name = "ai-trading-desk-lab"
-version = "2.0.0"
-description = "Market-first discovery engine with progressive evidence gates and protected OOS. No live execution."
-requires-python = ">=3.11"
-dependencies = []
-
+name="ai-trading-desk-lab"
+version="3.0.0"
+description="Open symbolic cross-asset discovery with double protected OOS. No live execution."
+requires-python=">=3.11"
+dependencies=[]
 [tool.setuptools.packages.find]
-include = ["trading_lab*"]
+include=["trading_lab*"]
