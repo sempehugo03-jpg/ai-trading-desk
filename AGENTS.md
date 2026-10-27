@@ -1,3 +1,7 @@
+# Mission liée JForex arrêtée — 27 octobre 2026
+
+Hugo a demandé : « Stop toute les projet JForex ». La consolidation JForex / ai-trading-desk pilotée par jforex-quant-desk #11 est STOPPED_BY_USER. Ne poursuivre ni reprendre automatiquement cette mission, ses recherches, tâches Codex ou essais JForex, même après rétablissement du quota. Préserver tous les fichiers et historiques. Nouvelle instruction explicite de Hugo requise pour cette mission.
+
 # Instructions pour les prochaines contributions
 
 ## Priorité et périmètre
